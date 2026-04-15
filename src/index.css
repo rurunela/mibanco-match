@@ -1,0 +1,160 @@
+/* =========================
+   RESET BASE (IMPORTANTE)
+========================= */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  font-family: 'Poppins', sans-serif;
+  background: #fff;
+  color: #333;
+}
+
+/* evita el “cuadro centrado raro” */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* =========================
+   VARIABLES MIBANCO
+========================= */
+
+:root {
+  --mibanco-green: #009330;
+  --mibanco-yellow: #ffce00;
+  --mibanco-blue: #3fb1e2;
+  --mibanco-red: #f4323f;
+
+  --mibanco-green-light: #5db836;
+  --mibanco-orange: #f39000;
+
+  --text-dark: #333;
+  --text-light: #666;
+  --bg-light: #f8f9fa;
+}
+
+/* =========================
+   TIPOGRAFÍA
+========================= */
+
+h1, h2, h3 {
+  font-weight: 700;
+}
+
+p {
+  color: var(--text-light);
+}
+
+/* =========================
+   BOTONES MIBANCO
+========================= */
+
+.btn-mibanco-green {
+  background: var(--mibanco-green);
+  border: none;
+  color: white;
+}
+
+.btn-mibanco-green:hover {
+  background: #007a28;
+}
+
+.btn-mibanco-yellow {
+  background: var(--mibanco-yellow);
+  border: none;
+  color: #000;
+}
+
+/* =========================
+   TEXTOS
+========================= */
+
+.text-mibanco-green {
+  color: var(--mibanco-green);
+}
+
+/* =========================
+   HERO FULL WIDTH FIX
+========================= */
+
+.hero-section {
+  width: 100%;
+  min-height: 90vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+
+  background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)),
+              url('/assets/img/hero.jpg') center/cover no-repeat;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+/* =========================
+   NAV FIX (bootstrap sometimes deja gaps)
+========================= */
+
+.container {
+  max-width: 1200px;
+}
+
+/* =========================
+   SIDEBAR DASHBOARD
+========================= */
+
+.sidebar {
+  min-height: 100vh;
+  background: #1f2937;
+}
+
+.sidebar a {
+  color: #cbd5e1;
+  text-decoration: none;
+  padding: 12px 16px;
+  display: block;
+}
+
+.sidebar a:hover,
+.sidebar a.active {
+  background: var(--mibanco-green);
+  color: white;
+}
+
+/* =========================
+   AVATAR
+========================= */
+
+.avatar-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+/* =========================
+   MATCH BADGES
+========================= */
+
+.match-high {
+  background: #d4edda;
+  color: #155724;
+}
+
+.match-medium {
+  background: #fff3cd;
+  color: #856404;
+}
