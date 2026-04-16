@@ -37,31 +37,52 @@ export function AuthProvider({ children }) {
 
       if (!snap.exists()) {
         await setDoc(ref, {
-          uid: u.uid,
-          name: u.displayName || "",
-          email: u.email || "",
-          photoURL: u.photoURL || "",
+  uid: u.uid,
+  name: u.displayName || "",
+  email: u.email || "",
+  photoURL: u.photoURL || "",
 
-          role: "user", // default seguro
+  role: "user",
 
-          headline: "",
-          bio: "",
-          status: "searching",
+  headline: "",
+  bio: "",
+  status: "searching",
 
-          skills: [],
-          experience: [],
+  location: {
+    city: "",
+    country: "Perú"
+  },
 
-          links: {
-            linkedin: "",
-            github: "",
-            portfolio: "",
-          },
+  // 🔥 CORE MATCH DATA
+  skills: [],
+  skills_normalized: [], // ← clave para match rápido
 
-          cvURL: "",
+  experience: [],
+  total_experience: 0, // ← calculado automático
 
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+  level: "Junior", // ← auto (Practicante, Junior, Mid, Senior)
+
+  education: [],
+  education_keywords: [], // ← ej: ["software","marketing"]
+
+  certifications: [],
+
+  preferences: {
+    modality: "",
+    type: ""
+  },
+
+  links: {
+    linkedin: "",
+    github: "",
+    portfolio: "",
+  },
+
+  cvURL: "",
+
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
       }
 
       setUser(u);

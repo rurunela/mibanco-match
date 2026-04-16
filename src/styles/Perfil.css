@@ -1,0 +1,9 @@
+.dropdown-item {
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.dropdown-item:hover {
+  background: #f5f5f5;
+}

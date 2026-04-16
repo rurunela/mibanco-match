@@ -1,160 +1,238 @@
-/* =========================
-   RESET BASE (IMPORTANTE)
-========================= */
-
+/* 🌍 RESET GLOBAL */
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
 }
 
-html, body {
-  width: 100%;
+html, body, #root {
   height: 100%;
-  overflow-x: hidden;
-  font-family: 'Poppins', sans-serif;
-  background: #fff;
-  color: #333;
+  margin: 0;
+  padding: 0;
 }
 
-/* evita el “cuadro centrado raro” */
-#root {
-  width: 100%;
-  min-height: 100vh;
-}
-
-/* =========================
-   VARIABLES MIBANCO
-========================= */
-
+/* 🎨 VARIABLES DE DISEÑO */
 :root {
-  --mibanco-green: #009330;
-  --mibanco-yellow: #ffce00;
-  --mibanco-blue: #3fb1e2;
-  --mibanco-red: #f4323f;
+  --primary: #009330;
+  --secondary: #5db836;
 
-  --mibanco-green-light: #5db836;
-  --mibanco-orange: #f39000;
+  --accent-yellow: #ffce00;
+  --accent-blue: #3fb1e2;
+  --accent-red: #f4323f;
+  --accent-orange: #f39000;
 
-  --text-dark: #333;
-  --text-light: #666;
-  --bg-light: #f8f9fa;
+  --bg: #f4f7fb;
+  --card-bg: #f8fafc;
+
+  --text: #1f2937;
+  --text-muted: #6b7280;
+
+  /* 🌫️ Neomorfismo suave */
+  --shadow-light: #ffffff;
+  --shadow-dark: #d1d9e6;
+
+  --radius: 16px;
 }
 
-/* =========================
-   TIPOGRAFÍA
-========================= */
-
-h1, h2, h3 {
-  font-weight: 700;
+/* 🧠 BODY GLOBAL */
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: linear-gradient(145deg, #eef2f7, #ffffff);
+  color: var(--text);
 }
 
-p {
-  color: var(--text-light);
-}
 
-/* =========================
-   BOTONES MIBANCO
-========================= */
-
-.btn-mibanco-green {
-  background: var(--mibanco-green);
+/* 🧾 CARDS (NEOMORFISMO SUAVE) */
+.card {
+  background: var(--card-bg);
   border: none;
-  color: white;
+  border-radius: var(--radius);
+
+  box-shadow:
+    6px 6px 12px var(--shadow-dark),
+    -6px -6px 12px var(--shadow-light);
+
+  transition: all 0.25s ease;
 }
 
-.btn-mibanco-green:hover {
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    10px 10px 20px var(--shadow-dark),
+    -10px -10px 20px var(--shadow-light);
+}
+
+/* 🔘 BOTONES */
+.btn {
+  border-radius: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn-success {
+  background: var(--primary);
+  border: none;
+}
+
+.btn-success:hover {
   background: #007a28;
 }
 
-.btn-mibanco-yellow {
-  background: var(--mibanco-yellow);
+.btn-warning {
+  background: var(--accent-yellow);
   border: none;
   color: #000;
 }
 
-/* =========================
-   TEXTOS
-========================= */
-
-.text-mibanco-green {
-  color: var(--mibanco-green);
+.btn-outline-secondary {
+  border-radius: 12px;
 }
 
-/* =========================
-   HERO FULL WIDTH FIX
-========================= */
+/* 🧠 INPUTS */
+.form-control, select {
+  border-radius: 12px;
+  border: none;
+  background: #f1f5f9;
 
-.hero-section {
-  width: 100%;
-  min-height: 90vh;
+  box-shadow:
+    inset 2px 2px 5px #d1d9e6,
+    inset -2px -2px 5px #ffffff;
+
+  transition: all 0.2s ease;
+}
+
+.form-control:focus {
+  outline: none;
+  box-shadow:
+    inset 1px 1px 3px #cbd5e1,
+    inset -1px -1px 3px #ffffff,
+    0 0 0 2px rgba(0, 147, 48, 0.2);
+}
+
+/* 🧭 NAVBAR */
+.navbar {
+  background: white !important;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* 👤 AVATAR */
+.navbar img {
+  transition: all 0.2s ease;
+}
+
+.navbar img:hover {
+  transform: scale(1.08);
+  border-color: var(--primary);
+}
+
+/* 📊 BADGES */
+.badge {
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+}
+
+/* 🟢 MATCH COLORS */
+.bg-success {
+  background: var(--primary) !important;
+}
+
+.bg-warning {
+  background: var(--accent-yellow) !important;
+  color: #000 !important;
+}
+
+.bg-secondary {
+  background: #cbd5e1 !important;
+}
+
+/* 📋 TABLA */
+.table {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.table thead {
+  background: #f1f5f9;
+}
+
+.table tbody tr {
+  transition: all 0.2s ease;
+}
+
+.table tbody tr:hover {
+  background: #f9fafb;
+  transform: scale(1.01);
+}
+
+/* 🎯 DROPDOWN PERFIL */
+.dropdown-item {
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: all 0.2s ease;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+}
+
+/* ✨ ANIMACIONES */
+.hover-scale {
+  transition: transform 0.2s ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+/* 📊 BARRAS EXPERIENCIA */
+.exp-bar {
+  border-radius: 6px;
   position: relative;
-  display: flex;
-  align-items: center;
-
-  background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)),
-              url('/assets/img/hero.jpg') center/cover no-repeat;
+  margin-right: 2px;
 }
 
-.hero-overlay {
-  position: absolute;
-  inset: 0;
+.exp-bar:hover {
+  transform: scaleY(1.1);
 }
 
-/* =========================
-   NAV FIX (bootstrap sometimes deja gaps)
-========================= */
 
-.container {
-  max-width: 1200px;
-}
-
-/* =========================
-   SIDEBAR DASHBOARD
-========================= */
-
-.sidebar {
-  min-height: 100vh;
-  background: #1f2937;
-}
-
-.sidebar a {
-  color: #cbd5e1;
-  text-decoration: none;
-  padding: 12px 16px;
+.exp-bar:hover .exp-tooltip-recharts {
   display: block;
 }
 
-.sidebar a:hover,
-.sidebar a.active {
-  background: var(--mibanco-green);
-  color: white;
+/* 🌈 DETALLE SUTIL PRO */
+h2, h4, h5 {
+  letter-spacing: 0.3px;
 }
 
-/* =========================
-   AVATAR
-========================= */
-
-.avatar-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
+/* 🧩 SCROLL BONITO */
+::-webkit-scrollbar {
+  width: 6px;
 }
 
-/* =========================
-   MATCH BADGES
-========================= */
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+} 
 
-.match-high {
-  background: #d4edda;
-  color: #155724;
+@keyframes floatUp {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-120px) scale(1.5);
+    opacity: 0;
+  }
 }
 
-.match-medium {
-  background: #fff3cd;
-  color: #856404;
+.heart-particle {
+  position: absolute;
+  color: var(--primary); /* Usando tu verde #009330 */
+  font-size: 1.5rem;
+  pointer-events: none;
+  animation: floatUp 3s linear infinite;
+  opacity: 0;
 }

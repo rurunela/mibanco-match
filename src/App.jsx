@@ -3,6 +3,7 @@ import MainLayout from "./layouts/MainLayout";
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
+import Perfil from "./pages/Perfil";
 
 export default function App() {
   return (
@@ -10,7 +11,7 @@ export default function App() {
 
       <Route element={<MainLayout />}>
         <Route path="/" element={<Home />} />
-
+        <Route path="/perfil" element={<Perfil />} />
         <Route
           path="/dashboard"
           element={
