@@ -1,20 +1,24 @@
+import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { Navigate } from "react-router-dom";
 
-export default function ProtectedRoute({ children, allow = [] }) {
-  const { loading, permissions } = useAuth();
+export default function ProtectedRoute({ allow, children }) {
+  const { user, profile, loading } = useAuth();
 
-  // 🔒 esperar Firebase
-  if (loading) return <p>Cargando...</p>;
+  // 1. MIENTRAS CARGA, NO RE-DIRIGAS. Quédate quieto.
+  if (loading) {
+    return <div className="p-10 text-center">Verificando acceso...</div>;
+  }
 
-  const role = permissions?.role ?? "user";
-
-  const hasAccess =
-    allow.length === 0 || allow.includes(role);
-
-  if (!hasAccess) {
+  // 2. SI NO HAY USUARIO, AL HOME
+  if (!user) {
     return <Navigate to="/" replace />;
   }
 
-  return children;
+  // 3. SI EL ROL NO COINCIDE
+  if (allow && !allow.includes(profile?.role)) {
+    return <Navigate to="/" replace />;
+  }
+
+  // 4. SOPORTE PARA AMBOS MODOS (como envoltorio o como ruta hija)
+  return children ? children : <Outlet />;
 }

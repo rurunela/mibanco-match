@@ -236,3 +236,12 @@ h2, h4, h5 {
   animation: floatUp 3s linear infinite;
   opacity: 0;
 }
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
