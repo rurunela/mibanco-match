@@ -1,10 +1,48 @@
 // Vacantes.jsx — MiBanco Talent
-// Página pública de vacantes: vista atractiva + postulación en tiempo real desde Firestore.
+// Página pública de vacantes con notificaciones completas para users y recruiters.
 
 import { useAuth } from "../context/AuthContext";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "../firebase/config";
-import { collection, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+  updateDoc,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
+
+// ─── HELPER COMPARTIDO CON DASHBOARD ──────────────────────────────────────────
+// Misma firma que createRecruiterNotification en Dashboard.jsx.
+// El campo isRecruiterNotification:true es el que Notificaciones.jsx usa
+// para distinguir notificaciones de reclutadores vs candidatos.
+async function sendRecruiterNotification(db, {
+  recruiterId,
+  type         = "general",
+  message,
+  vacancyId    = "",
+  vacancyTitle = "",
+  candidateName= "",
+}) {
+  if (!recruiterId || !message) return;
+  await addDoc(collection(db, "notifications"), {
+    userId:                  recruiterId,
+    type,
+    message,
+    vacancyId,
+    vacancyTitle,
+    candidateName,
+    read:                    false,
+    isRecruiterNotification: true,        // ← campo clave que Dashboard también pone
+    createdAt:               serverTimestamp(),
+  });
+}
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 const timeAgo = isoStr => {
@@ -29,81 +67,126 @@ const remainingDays = deadline => {
 };
 
 // ─── ICONS ─────────────────────────────────────────────────────────────────────
-const MapPinIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>;
-const BriefcaseIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>;
-const ClockIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
-const UsersIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
-const SearchIcon = () => <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>;
-const XIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>;
-const CheckIcon = () => <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>;
-const ShareIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>;
+const MapPinIcon    = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+const BriefcaseIcon = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>;
+const ClockIcon     = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const UsersIcon     = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+const SearchIcon    = () => <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const XIcon         = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const CheckIcon     = () => <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
+const ShareIcon     = () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>;
 
-// ─── LEVEL BADGE ──────────────────────────────────────────────────────────────
+// ─── BADGES ────────────────────────────────────────────────────────────────────
 const LEVEL_COLORS = {
-  "Junior": { bg: "#eff6ff", color: "#3b82f6" },
-  "Mid": { bg: "#f0fdf4", color: "#009330" },
-  "Senior": { bg: "#fef3c7", color: "#d97706" },
+  "Junior":      { bg: "#eff6ff", color: "#3b82f6" },
+  "Mid":         { bg: "#f0fdf4", color: "#009330" },
+  "Senior":      { bg: "#fef3c7", color: "#d97706" },
   "Practicante": { bg: "#f5f3ff", color: "#7c3aed" },
-  "No aplica": { bg: "#f1f5f9", color: "#6b7280" },
+  "No aplica":   { bg: "#f1f5f9", color: "#6b7280" },
 };
 
 const LevelBadge = ({ level }) => {
   if (!level || level === "No aplica") return null;
   const c = LEVEL_COLORS[level] || LEVEL_COLORS["No aplica"];
-  return (
-    <span style={{ fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, borderRadius: 8, padding: "3px 10px" }}>
-      {level}
-    </span>
-  );
+  return <span style={{ fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, borderRadius: 8, padding: "3px 10px" }}>{level}</span>;
 };
 
 const ModalityBadge = ({ modality }) => {
   const map = {
-    "Remoto": { icon: "🏠", bg: "#f0fdf4", color: "#009330" },
+    "Remoto":     { icon: "🏠", bg: "#f0fdf4", color: "#009330" },
     "Presencial": { icon: "🏢", bg: "#eff6ff", color: "#3fb1e2" },
-    "Híbrido": { icon: "🔄", bg: "#fff7ed", color: "#f39000" },
+    "Híbrido":    { icon: "🔄", bg: "#fff7ed", color: "#f39000" },
   };
   const c = map[modality] || { icon: "📍", bg: "#f1f5f9", color: "#6b7280" };
-  return (
-    <span style={{ fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}>
-      {c.icon} {modality}
-    </span>
-  );
+  return <span style={{ fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}>{c.icon} {modality}</span>;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── APPLY MODAL ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 function ApplyModal({ job, userId, userProfile, onClose, onSuccess }) {
   const [motivation, setMotivation] = useState("");
-  const [cvFile, setCvFile] = useState(null);
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [cvFile, setCvFile]         = useState(null);
+  const [sending, setSending]       = useState(false);
+  const [sent, setSent]             = useState(false);
 
   const handleApply = async () => {
-    if (!motivation.trim() && !cvFile && !userProfile?.cvUrl) return; 
+    if (!motivation.trim() && !cvFile && !userProfile?.cvUrl) return;
     setSending(true);
     try {
-      // Nota: Si hay cvFile, aquí deberías subirlo a Storage y obtener la URL. 
-      // Por brevedad, lo simulamos enviando la postulación directa.
+      const recruiterId   = job.createdBy;
+      const candidateName = userProfile?.name || "un candidato";
+
+      // ── PASO 1: contar ANTES de insertar ───────────────────────────────────
+      // Conteo previo = determinista, sin ambigüedad de si el nuevo doc
+      // ya está en Firestore cuando hacemos el GET.
+      let prevCount = 0;
+      if (recruiterId) {
+        const prevSnap = await getDocs(
+          query(collection(db, "applications"), where("jobId", "==", job.id))
+        );
+        prevCount = prevSnap.size;
+      }
+
+      // ── PASO 2: insertar la postulación ────────────────────────────────────
       await addDoc(collection(db, "applications"), {
-        jobId: job.id,
-        jobTitle: job.title,
-        candidateId: userId,
-        candidateName: userProfile?.name || "",
+        jobId:         job.id,
+        jobTitle:      job.title,
+        candidateId:   userId,
+        candidateName,
         motivation,
-        status: "pending",
-        appliedAt: serverTimestamp(),
+        status:        "pending",
+        appliedAt:     serverTimestamp(),
       });
 
-      await addDoc(collection(db, "notifications"), {
-        userId: job.createdBy || "recruiter",
-        message: `Nueva postulación de ${userProfile?.name} para ${job.title}`,
-        read: false,
-        createdAt: serverTimestamp(),
-      });
+      const newCount = prevCount + 1; // conteo definitivo, sin race condition
+
+      // ── PASO 3: notificación de actividad al reclutador ────────────────────
+      if (recruiterId) {
+        await sendRecruiterNotification(db, {
+          recruiterId,
+          type:         "vacancy_activity",
+          message:      `Nueva postulación de ${candidateName} para "${job.title}"`,
+          vacancyId:    job.id,
+          vacancyTitle: job.title,
+          candidateName,
+        });
+
+        // ── PASO 4: comprobar reglas count_threshold del reclutador ───────────
+        // Dispara SOLO cuando se cruza el umbral (prevCount < threshold <= newCount).
+        // Esto evita notificaciones duplicadas si el umbral ya fue superado antes.
+        try {
+          const rulesSnap = await getDocs(
+            query(
+              collection(db, "notificationRules"),
+              where("userId",  "==", recruiterId),
+              where("type",    "==", "count_threshold"),
+              where("enabled", "==", true)
+            )
+          );
+
+          for (const ruleDoc of rulesSnap.docs) {
+            const threshold = Number(ruleDoc.data().config?.threshold);
+            if (threshold > 0 && prevCount < threshold && newCount >= threshold) {
+              await sendRecruiterNotification(db, {
+                recruiterId,
+                type:         "count_threshold",
+                message:      `🔢 La vacante "${job.title}" alcanzó ${threshold} postulacion${threshold !== 1 ? "es" : ""}`,
+                vacancyId:    job.id,
+                vacancyTitle: job.title,
+              });
+            }
+          }
+        } catch (ruleErr) {
+          console.error("[Vacantes] Error revisando reglas count_threshold:", ruleErr);
+        }
+      }
 
       setSent(true);
       setTimeout(() => { onSuccess(); onClose(); }, 1800);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error("[Vacantes] Error en handleApply:", e);
+    }
     setSending(false);
   };
 
@@ -135,26 +218,17 @@ function ApplyModal({ job, userId, userProfile, onClose, onSuccess }) {
               <div style={{ fontSize: 12, color: "#6b7280" }}>{userProfile?.headline || ""}</div>
             </div>
 
-            {/* Subida de CV Requisito */}
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>
-                Tu Currículum Vitae *
-              </label>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>Tu Currículum Vitae *</label>
               {userProfile?.cvUrl ? (
-                <div style={{ fontSize: 12, color: "#009330", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
-                  <CheckIcon /> Ya tienes un CV guardado en tu perfil.
-                </div>
+                <div style={{ fontSize: 12, color: "#009330", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><CheckIcon /> Ya tienes un CV guardado en tu perfil.</div>
               ) : (
-                <div style={{ fontSize: 12, color: "#f39000", marginBottom: 6 }}>
-                  No tienes un CV en tu perfil. Sube uno a continuación:
-                </div>
+                <div style={{ fontSize: 12, color: "#f39000", marginBottom: 6 }}>No tienes un CV en tu perfil. Sube uno a continuación:</div>
               )}
               <input type="file" accept=".pdf,.doc,.docx" onChange={e => setCvFile(e.target.files[0])} style={{ fontSize: 12, width: "100%", padding: "8px", border: "1px dashed #d1d5db", borderRadius: 8 }} />
             </div>
 
-            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>
-              Carta de presentación / Motivación *
-            </label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>Carta de presentación / Motivación *</label>
             <textarea
               value={motivation}
               onChange={e => setMotivation(e.target.value)}
@@ -165,7 +239,9 @@ function ApplyModal({ job, userId, userProfile, onClose, onSuccess }) {
 
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={onClose} style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1.5px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>En otro momento</button>
-              <button onClick={handleApply} disabled={(!motivation.trim() && !cvFile && !userProfile?.cvUrl) || sending}
+              <button
+                onClick={handleApply}
+                disabled={(!motivation.trim() && !cvFile && !userProfile?.cvUrl) || sending}
                 style={{ flex: 2, padding: "12px 0", borderRadius: 12, border: "none", background: "#009330", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,147,48,.3)", opacity: (!motivation.trim() || sending) ? 0.6 : 1 }}>
                 {sending ? "Enviando..." : "🚀 Enviar"}
               </button>
@@ -177,16 +253,18 @@ function ApplyModal({ job, userId, userProfile, onClose, onSuccess }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── JOB DETAIL MODAL ──────────────────────────────────────────────────────────
-function JobDetailModal({ job, applied, onClose, onApply }) {
+// ═══════════════════════════════════════════════════════════════════════════════
+function JobDetailModal({ job, applied, acceptedCount, onClose, onApply }) {
   const dead = remainingDays(job.hiring_deadline);
 
-  const handleShare = (platform) => {
+  const handleShare = platform => {
     const text = `¡Mira esta vacante de ${job.title} en MiBanco Talent!`;
-    const url = window.location.href; // En producción, agregar ID de la vacante a la URL
-    if (platform === 'facebook') window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
-    if (platform === 'google') window.open(`https://mail.google.com/mail/?view=cm&fs=1&tf=1&to=&su=${text}&body=${url}`, '_blank'); // Redirige a Gmail
-    if (platform === 'email') window.location.href = `mailto:?subject=${text}&body=Te comparto esta vacante: ${url}`;
+    const url  = window.location.href;
+    if (platform === "facebook") window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, "_blank");
+    if (platform === "google")   window.open(`https://mail.google.com/mail/?view=cm&fs=1&tf=1&to=&su=${text}&body=${url}`, "_blank");
+    if (platform === "email")    window.location.href = `mailto:?subject=${text}&body=Te comparto esta vacante: ${url}`;
   };
 
   return (
@@ -213,7 +291,7 @@ function JobDetailModal({ job, applied, onClose, onApply }) {
             )}
           </div>
         </div>
-        
+
         {/* Body */}
         <div style={{ overflowY: "auto", flex: 1, padding: "24px 28px" }}>
           {job.salary_range && (
@@ -250,7 +328,7 @@ function JobDetailModal({ job, applied, onClose, onApply }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {[
               { label: "Experiencia mínima", value: job.min_experience ? `${job.min_experience} año${job.min_experience !== 1 ? "s" : ""}` : "Sin requisito" },
-              { label: "Plazas disponibles", value: job.vacancies || 1 },
+              { label: "Plazas disponibles",  value: (() => { const max = Number(job.vacancies) || 1; const left = Math.max(0, max - (acceptedCount || 0)); return left === max ? max : `${left} de ${max}`; })() },
             ].map(({ label, value }) => (
               <div key={label} style={{ background: "#f8fafc", borderRadius: 12, padding: "12px 16px", boxShadow: "4px 4px 10px #d1d9e6,-4px -4px 10px #fff" }}>
                 <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 }}>{label}</div>
@@ -259,17 +337,17 @@ function JobDetailModal({ job, applied, onClose, onApply }) {
             ))}
           </div>
 
-          {/* Compartir Vacante */}
+          {/* Compartir */}
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #f1f5f9" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><ShareIcon/> Compartir vacante</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><ShareIcon /> Compartir vacante</div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => handleShare('google')} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>G Correo</button>
-              <button onClick={() => handleShare('facebook')} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#1877F2", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, border: "none" }}>Facebook</button>
-              <button onClick={() => handleShare('email')} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Email</button>
+              <button onClick={() => handleShare("google")}   style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff",    cursor: "pointer", fontSize: 13, fontWeight: 600 }}>G Correo</button>
+              <button onClick={() => handleShare("facebook")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none",               background: "#1877F2", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Facebook</button>
+              <button onClick={() => handleShare("email")}    style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff",    cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Email</button>
             </div>
           </div>
         </div>
-        
+
         {/* Footer */}
         <div style={{ padding: "16px 28px", borderTop: "1px solid #f1f5f9", background: "#f8fafc" }}>
           {applied ? (
@@ -277,7 +355,7 @@ function JobDetailModal({ job, applied, onClose, onApply }) {
               <CheckIcon /> Ya postulaste a esta vacante
             </div>
           ) : (
-            <button onClick={onApply} style={{ width: "100%", padding: "14px 0", borderRadius: 14, border: "none", background: "#009330", color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,147,48,.35)", transition: "all .2s" }}>
+            <button onClick={onApply} style={{ width: "100%", padding: "14px 0", borderRadius: 14, border: "none", background: "#009330", color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,147,48,.35)" }}>
               🚀 Postularme a esta vacante
             </button>
           )}
@@ -287,26 +365,29 @@ function JobDetailModal({ job, applied, onClose, onApply }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── JOB CARD ──────────────────────────────────────────────────────────────────
-function JobCard({ job, applied, applicationCount, onView, onApply }) {
+// ═══════════════════════════════════════════════════════════════════════════════
+function JobCard({ job, applied, applicationCount, acceptedCount, onView, onApply }) {
   const [hovered, setHovered] = useState(false);
   const dead = remainingDays(job.hiring_deadline);
 
-  // Empuje Psicológico: Calculamos un porcentaje de match simulado basado en el título para que se mantenga estable
   const matchScore = useMemo(() => {
-    const base = 80;
+    const base    = 80;
     const variant = job.title ? job.title.charCodeAt(0) % 18 : 10;
-    return base + variant; // Resultado entre 80% y 98%
+    return base + variant;
   }, [job.title]);
+
+  const maxVacancies = Number(job.vacancies) || 1;
+  const slotsLeft    = Math.max(0, maxVacancies - acceptedCount);
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ background: "#f8fafc", borderRadius: 18, padding: "22px 24px", marginBottom: 16,
-        boxShadow: hovered ? "10px 10px 20px #c8d0dd,-10px -10px 20px #fff" : "6px 6px 14px #d1d9e6,-6px -6px 14px #fff",
-        transition: "box-shadow .25s,transform .2s", transform: hovered ? "translateY(-2px)" : "none",
-        cursor: "pointer", position: "relative" }}
+      style={{ background: "#f8fafc", borderRadius: 18, padding: "22px 24px", marginBottom: 16, position: "relative",
+        boxShadow:  hovered ? "10px 10px 20px #c8d0dd,-10px -10px 20px #fff" : "6px 6px 14px #d1d9e6,-6px -6px 14px #fff",
+        transition: "box-shadow .25s,transform .2s", transform: hovered ? "translateY(-2px)" : "none", cursor: "pointer" }}
     >
       {applied && (
         <div style={{ position: "absolute", top: 16, right: 16, background: "#f0fdf4", color: "#009330", borderRadius: 10, padding: "4px 12px", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
@@ -317,23 +398,16 @@ function JobCard({ job, applied, applicationCount, onView, onApply }) {
         <div style={{ fontWeight: 800, fontSize: 16, color: "#1f2937", marginBottom: 4 }}>{job.title}</div>
         <div style={{ fontSize: 13, color: "#009330", fontWeight: 600 }}>{job.created_by || "MiBanco Talent"}</div>
       </div>
-      
-      {/* Componente de Empuje Psicológico */}
       {!applied && (
         <div style={{ display: "inline-block", background: "#fef3c7", color: "#d97706", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, marginBottom: 12 }}>
           🎯 Tienes {matchScore}% de match, ¡candidatos como tú fueron contratados!
         </div>
       )}
-
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <ModalityBadge modality={job.modality} />
         <LevelBadge level={job.level} />
-        <span style={{ fontSize: 11, fontWeight: 600, background: "#f1f5f9", color: "#6b7280", borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <BriefcaseIcon /> {job.type}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 600, background: "#f1f5f9", color: "#6b7280", borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <MapPinIcon /> {job.city}
-        </span>
+        <span style={{ fontSize: 11, fontWeight: 600, background: "#f1f5f9", color: "#6b7280", borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}><BriefcaseIcon /> {job.type}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, background: "#f1f5f9", color: "#6b7280", borderRadius: 8, padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: 4 }}><MapPinIcon /> {job.city}</span>
       </div>
       {job.description && (
         <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.6, marginBottom: 12 }}>
@@ -345,15 +419,20 @@ function JobCard({ job, applied, applicationCount, onView, onApply }) {
           {job.skills_required.slice(0, 5).map(s => (
             <span key={s} style={{ fontSize: 11, background: "#f0fdf4", color: "#009330", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>{s}</span>
           ))}
-          {job.skills_required.length > 5 && (
-            <span style={{ fontSize: 11, color: "#9ca3af" }}>+{job.skills_required.length - 5} más</span>
-          )}
+          {job.skills_required.length > 5 && <span style={{ fontSize: 11, color: "#9ca3af" }}>+{job.skills_required.length - 5} más</span>}
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 12, borderTop: "1px solid #f1f5f9" }}>
         <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#9ca3af" }}>
           {dead && <span style={{ color: dead.color, fontWeight: 700, fontSize: 11 }}>{dead.label}</span>}
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><UsersIcon /> {applicationCount || 0} postulantes</span>
+          <span style={{
+            display: "flex", alignItems: "center", gap: 4,
+            color: slotsLeft === 1 ? "#f4323f" : slotsLeft <= 3 ? "#f39000" : "#009330",
+            fontWeight: 700, fontSize: 11,
+          }}>
+            {slotsLeft === 1 ? "⚡" : slotsLeft <= 3 ? "⏳" : "✅"} {slotsLeft} plaza{slotsLeft !== 1 ? "s" : ""} disponible{slotsLeft !== 1 ? "s" : ""}
+          </span>
           <span>{timeAgo(job.created_at)}</span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -377,25 +456,31 @@ function JobCard({ job, applied, applicationCount, onView, onApply }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function Vacantes() {
-  const { user, profile } = useAuth();
-  const [jobs, setJobs] = useState([]);
-  const [applications, setApplications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
+  const { user, profile, permissions } = useAuth();
+  const [jobs, setJobs]                = useState([]);
+  const [applications, setApplications]= useState([]);
+  const [loading, setLoading]          = useState(true);
+
   // Filters
-  const [search, setSearch] = useState("");
+  const [search,         setSearch]         = useState("");
   const [filterModality, setFilterModality] = useState("all");
-  const [filterType, setFilterType] = useState("all");
-  const [filterLevel, setFilterLevel] = useState("all");
-  const [filterCity, setFilterCity] = useState("all");
-  
+  const [filterType,     setFilterType]     = useState("all");
+  const [filterLevel,    setFilterLevel]    = useState("all");
+  const [filterCity,     setFilterCity]     = useState("all");
+
   // Modals
-  const [applyModal, setApplyModal] = useState(null);
+  const [applyModal,  setApplyModal]  = useState(null);
   const [detailModal, setDetailModal] = useState(null);
 
-  // ── Firebase real-time ──────────────────────────────────────────────────────
+  // ── Refs anti-duplicado por sesión ─────────────────────────────────────────
+  const notifiedSkillJobsRef = useRef(new Set()); // jobs cuyo skill-match ya procesamos
+  const closedJobsRef        = useRef(new Set()); // jobs que ya intentamos cerrar
+
+  // ── Firestore real-time ────────────────────────────────────────────────────
   useEffect(() => {
     const unsubJobs = onSnapshot(collection(db, "jobs"), snap => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -407,35 +492,194 @@ export default function Vacantes() {
     return () => { unsubJobs(); unsubApps(); };
   }, []);
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
-  const myApplications = useMemo(() => applications.filter(a => a.candidateId === user?.uid), [applications, user?.uid]);
-  const appliedJobIds = useMemo(() => new Set(myApplications.map(a => a.jobId)), [myApplications]);
+  // ── Datos derivados ────────────────────────────────────────────────────────
+  const myApplications = useMemo(
+    () => applications.filter(a => a.candidateId === user?.uid),
+    [applications, user?.uid]
+  );
+  const appliedJobIds = useMemo(
+    () => new Set(myApplications.map(a => a.jobId)),
+    [myApplications]
+  );
   const appCountByJob = useMemo(() => {
     const map = {};
     applications.forEach(a => { map[a.jobId] = (map[a.jobId] || 0) + 1; });
     return map;
   }, [applications]);
-  const cities = useMemo(() => [...new Set(jobs.map(j => j.city).filter(Boolean))].sort(), [jobs]);
+
+  // Cuenta únicamente los candidatos aceptados (decision del reclutador vía handleFinalize)
+  const acceptedCountByJob = useMemo(() => {
+    const map = {};
+    applications.forEach(a => {
+      if (a.status === "accepted") map[a.jobId] = (map[a.jobId] || 0) + 1;
+    });
+    return map;
+  }, [applications]);
+
+  const cities     = useMemo(() => [...new Set(jobs.map(j => j.city).filter(Boolean))].sort(), [jobs]);
   const modalities = useMemo(() => [...new Set(jobs.map(j => j.modality).filter(Boolean))].sort(), [jobs]);
-  const types = useMemo(() => [...new Set(jobs.map(j => j.type).filter(Boolean))].sort(), [jobs]);
-  const levels = useMemo(() => [...new Set(jobs.map(j => j.level).filter(Boolean).filter(l => l !== "No aplica"))].sort(), [jobs]);
-  
+  const types      = useMemo(() => [...new Set(jobs.map(j => j.type).filter(Boolean))].sort(), [jobs]);
+  const levels     = useMemo(() => [...new Set(jobs.map(j => j.level).filter(Boolean).filter(l => l !== "No aplica"))].sort(), [jobs]);
+
+  // Vacantes activas: excluye Inactivo Y Cerrada
   const filteredJobs = useMemo(() => {
     return jobs
-      .filter(j => j.status !== "Inactivo")
+      .filter(j => j.status !== "Inactivo" && j.status !== "Cerrada")
       .filter(j => !search.trim() || j.title?.toLowerCase().includes(search.toLowerCase()) || (j.skills_required || []).some(s => s.toLowerCase().includes(search.toLowerCase())))
       .filter(j => filterModality === "all" || j.modality === filterModality)
-      .filter(j => filterType === "all" || j.type === filterType)
-      .filter(j => filterLevel === "all" || j.level === filterLevel)
-      .filter(j => filterCity === "all" || j.city === filterCity)
+      .filter(j => filterType     === "all" || j.type     === filterType)
+      .filter(j => filterLevel    === "all" || j.level    === filterLevel)
+      .filter(j => filterCity     === "all" || j.city     === filterCity)
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   }, [jobs, search, filterModality, filterType, filterLevel, filterCity]);
 
-  const hasFilters = search || filterModality !== "all" || filterType !== "all" || filterLevel !== "all" || filterCity !== "all";
+  const hasFilters   = search || filterModality !== "all" || filterType !== "all" || filterLevel !== "all" || filterCity !== "all";
   const clearFilters = () => { setSearch(""); setFilterModality("all"); setFilterType("all"); setFilterLevel("all"); setFilterCity("all"); };
 
-  // ── Styles ──────────────────────────────────────────────────────────────────
-  const inp = { borderRadius: 12, border: "1.5px solid #e5e7eb", background: "#f1f5f9", boxShadow: "inset 2px 2px 5px #d1d9e6,inset -2px -2px 5px #fff", padding: "9px 14px", fontSize: 13, outline: "none", color: "#1f2937" };
+  // ══════════════════════════════════════════════════════════════════════════════
+  // EFECTO A — Skill-match: notificar al USER cuando una vacante coincide con sus skills
+  //
+  // • Solo para rol "user" (no reclutadores ni admins).
+  // • Doc ID determinista "skill_match_{uid}_{jobId}" → nunca duplica en Firestore.
+  // • notifiedSkillJobsRef evita getDoc() repetidos dentro de la misma sesión.
+  // • Las notificaciones de usuario NO llevan isRecruiterNotification.
+  // ══════════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!user?.uid || !profile?.skills?.length || permissions?.isRecruiter) return;
+
+    const userSkillSet = new Set([
+      ...(profile.skills_normalized || []),
+      ...(profile.skills            || []),
+    ].map(s => s.toLowerCase().trim()));
+
+    if (userSkillSet.size === 0) return;
+
+    (async () => {
+      for (const job of jobs) {
+        if (job.status === "Inactivo" || job.status === "Cerrada") continue;
+        if (notifiedSkillJobsRef.current.has(job.id))              continue;
+        notifiedSkillJobsRef.current.add(job.id);
+
+        const jobSkills      = (job.skills_required || []).map(s => s.toLowerCase().trim());
+        const matchingSkills = jobSkills.filter(s => userSkillSet.has(s));
+        if (matchingSkills.length === 0) continue;
+
+        const notifRef = doc(db, "notifications", `skill_match_${user.uid}_${job.id}`);
+        try {
+          const existing = await getDoc(notifRef);
+          if (!existing.exists()) {
+            await setDoc(notifRef, {
+              userId:         user.uid,
+              type:           "new_vacancy_match",
+              message:        `Nueva vacante que coincide con tus skills: "${job.title}" — ${matchingSkills.join(", ")}`,
+              jobId:          job.id,
+              vacancyTitle:   job.title,
+              matchingSkills,
+              read:           false,
+              createdAt:      serverTimestamp(),
+            });
+          }
+        } catch (err) {
+          console.error("[Vacantes] Error skill-match notif:", err);
+        }
+      }
+    })();
+  }, [jobs, user?.uid, profile?.skills, profile?.skills_normalized, permissions?.isRecruiter]);
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // EFECTO B — Auto-cierre y alertas de plazas restantes.
+  //
+  // • El cierre ocurre SOLO cuando acceptedCount >= vacancies,
+  //   es decir, cuando el reclutador ha aceptado suficientes candidatos
+  //   via handleFinalize en Dashboard. Las postulaciones totales NO cierran
+  //   la vacante.
+  // • Notificación "slots_remaining": se dispara cuando el número de plazas
+  //   libres restantes cruza el umbral configurado por el reclutador en
+  //   notificationRules (type="slots_remaining", config.threshold = N).
+  // • closedJobsRef evita dobles escrituras en la misma sesión.
+  // • notifiedSlotsRef evita notificaciones repetidas de umbral por sesión.
+  // ══════════════════════════════════════════════════════════════════════════════
+  const notifiedSlotsRef = useRef(new Set()); // "jobId_threshold" ya notificados
+
+  useEffect(() => {
+    if (!jobs.length) return;
+
+    (async () => {
+      for (const job of jobs) {
+        if (job.status === "Cerrada" || job.status === "Inactivo") continue;
+
+        const maxVacancies  = Number(job.vacancies) || 1;
+        const acceptedCount = acceptedCountByJob[job.id] || 0;
+        const slotsLeft     = maxVacancies - acceptedCount; // plazas aún disponibles
+
+        // ── 1. Auto-cierre cuando todas las plazas están cubiertas ──────────
+        if (slotsLeft <= 0 && !closedJobsRef.current.has(job.id)) {
+          closedJobsRef.current.add(job.id); // marcar ANTES del await
+
+          try {
+            await updateDoc(doc(db, "jobs", job.id), {
+              status:       "Cerrada",
+              closedAt:     serverTimestamp(),
+              closedReason: "all_positions_filled",
+            });
+
+            if (job.createdBy) {
+              await sendRecruiterNotification(db, {
+                recruiterId:  job.createdBy,
+                type:         "vacancy_closed",
+                message:      `✅ La vacante "${job.title}" se cerró automáticamente: se cubrieron las ${maxVacancies} plaza${maxVacancies !== 1 ? "s" : ""} disponible${maxVacancies !== 1 ? "s" : ""}.`,
+                vacancyId:    job.id,
+                vacancyTitle: job.title,
+              });
+            }
+          } catch (err) {
+            closedJobsRef.current.delete(job.id); // liberar si falló
+            console.error("[Vacantes] Error auto-cierre vacante:", err);
+          }
+
+          continue; // si ya se cerró no hace falta revisar umbrales
+        }
+
+        // ── 2. Notificaciones de plazas restantes (slots_remaining) ─────────
+        // Solo si hay reclutador asignado y quedan plazas
+        if (!job.createdBy || slotsLeft <= 0) continue;
+
+        try {
+          const rulesSnap = await getDocs(
+            query(
+              collection(db, "notificationRules"),
+              where("userId",  "==", job.createdBy),
+              where("type",    "==", "slots_remaining"),
+              where("enabled", "==", true)
+            )
+          );
+
+          for (const ruleDoc of rulesSnap.docs) {
+            const threshold  = Number(ruleDoc.data().config?.threshold);
+            const notifKey   = `${job.id}_${threshold}`;
+
+            // Disparar cuando slotsLeft sea exactamente igual al umbral
+            // (es decir, al momento preciso en que se cruza ese límite)
+            if (threshold > 0 && slotsLeft === threshold && !notifiedSlotsRef.current.has(notifKey)) {
+              notifiedSlotsRef.current.add(notifKey);
+              await sendRecruiterNotification(db, {
+                recruiterId:  job.createdBy,
+                type:         "slots_remaining",
+                message:      `⚠️ Quedan solo ${slotsLeft} plaza${slotsLeft !== 1 ? "s" : ""} por cubrir en la vacante "${job.title}".`,
+                vacancyId:    job.id,
+                vacancyTitle: job.title,
+              });
+            }
+          }
+        } catch (ruleErr) {
+          console.error("[Vacantes] Error revisando reglas slots_remaining:", ruleErr);
+        }
+      }
+    })();
+  }, [acceptedCountByJob, jobs]);
+
+  // ── Estilos ────────────────────────────────────────────────────────────────
+  const inp      = { borderRadius: 12, border: "1.5px solid #e5e7eb", background: "#f1f5f9", boxShadow: "inset 2px 2px 5px #d1d9e6,inset -2px -2px 5px #fff", padding: "9px 14px", fontSize: 13, outline: "none", color: "#1f2937" };
   const selStyle = { ...inp, cursor: "pointer", minWidth: 130 };
 
   return (
@@ -445,12 +689,8 @@ export default function Vacantes() {
         <div style={{ position: "absolute", top: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,.08)" }} />
         <div style={{ position: "absolute", bottom: -80, right: -40, width: 250, height: 250, borderRadius: "50%", background: "rgba(255,255,255,.06)" }} />
         <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,.75)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 2 }}>
-            MiBanco Talent
-          </div>
-          <h1 style={{ color: "#fff", fontWeight: 900, fontSize: "clamp(26px,4vw,40px)", margin: "0 0 12px", lineHeight: 1.2 }}>
-            Vacantes disponibles
-          </h1>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,.75)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 2 }}>MiBanco Talent</div>
+          <h1 style={{ color: "#fff", fontWeight: 900, fontSize: "clamp(26px,4vw,40px)", margin: "0 0 12px", lineHeight: 1.2 }}>Vacantes disponibles</h1>
           <p style={{ color: "rgba(255,255,255,.85)", fontSize: 16, maxWidth: 520, margin: "0 auto 28px", lineHeight: 1.6 }}>
             Descubre oportunidades que se adaptan a tu perfil y da el siguiente paso en tu carrera.
           </p>
@@ -463,9 +703,9 @@ export default function Vacantes() {
           </div>
           <div style={{ marginTop: 20, display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap" }}>
             {[
-              { label: `${jobs.length} vacantes`, icon: "💼" },
-              { label: `${appliedJobIds.size} postulaciones mías`, icon: "📋" },
-              { label: "Tiempo real", icon: "⚡" },
+              { label: `${filteredJobs.length} vacantes activas`,     icon: "💼" },
+              { label: `${myApplications.length} postulaciones mías`, icon: "📋" },
+              { label: "Tiempo real",                                   icon: "⚡" },
             ].map(item => (
               <span key={item.label} style={{ fontSize: 13, color: "rgba(255,255,255,.9)", display: "flex", alignItems: "center", gap: 5, fontWeight: 600 }}>
                 {item.icon} {item.label}
@@ -477,7 +717,7 @@ export default function Vacantes() {
 
       {/* ── MAIN CONTENT ──────────────────────────────────────────────────────── */}
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 16px 48px" }}>
-        {/* Filters strip */}
+        {/* Filtros */}
         <div style={{ background: "#f8fafc", borderRadius: "0 0 18px 18px", boxShadow: "6px 6px 14px #d1d9e6,-6px -6px 14px #fff", padding: "16px 20px", marginBottom: 24, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <select value={filterModality} onChange={e => setFilterModality(e.target.value)} style={selStyle}>
             <option value="all">🔄 Modalidad</option>
@@ -496,16 +736,14 @@ export default function Vacantes() {
             {cities.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           {hasFilters && (
-            <button onClick={clearFilters} style={{ padding: "9px 14px", borderRadius: 10, border: "none", background: "#ffce00", color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
-              ↺ Limpiar
-            </button>
+            <button onClick={clearFilters} style={{ padding: "9px 14px", borderRadius: 10, border: "none", background: "#ffce00", color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>↺ Limpiar</button>
           )}
           <div style={{ marginLeft: "auto", fontSize: 13, color: "#6b7280", fontWeight: 600 }}>
             {filteredJobs.length} resultado{filteredJobs.length !== 1 ? "s" : ""}
           </div>
         </div>
 
-        {/* Jobs list */}
+        {/* Lista */}
         {loading ? (
           <div style={{ textAlign: "center", padding: 60 }}>
             <div style={{ width: 44, height: 44, border: "4px solid #009330", borderTop: "4px solid transparent", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
@@ -525,6 +763,7 @@ export default function Vacantes() {
               job={job}
               applied={appliedJobIds.has(job.id)}
               applicationCount={appCountByJob[job.id] || 0}
+              acceptedCount={acceptedCountByJob[job.id] || 0}
               onView={() => setDetailModal(job)}
               onApply={() => {
                 if (!user) return alert("Inicia sesión para postularte.");
@@ -534,7 +773,7 @@ export default function Vacantes() {
           ))
         )}
 
-        {/* My applications section */}
+        {/* Mis postulaciones */}
         {myApplications.length > 0 && (
           <div style={{ marginTop: 32, padding: "24px", background: "#f8fafc", borderRadius: 18, boxShadow: "6px 6px 14px #d1d9e6,-6px -6px 14px #fff" }}>
             <h3 style={{ margin: "0 0 16px", fontWeight: 800, color: "#1f2937" }}>Tus postulaciones recientes</h3>
@@ -546,11 +785,12 @@ export default function Vacantes() {
                     Enviada el {app.appliedAt?.toDate ? app.appliedAt.toDate().toLocaleDateString("es-PE") : "Recientemente"}
                   </div>
                 </div>
-                <div>
-                  <span style={{ fontSize: 11, fontWeight: 700, background: app.status === "accepted" ? "#f0fdf4" : app.status === "rejected" ? "#fff5f5" : "#eff6ff", color: app.status === "accepted" ? "#009330" : app.status === "rejected" ? "#f4323f" : "#3b82f6", borderRadius: 8, padding: "6px 12px" }}>
-                    {app.status === "pending" ? "En revisión ⏳" : app.status === "accepted" ? "Aceptado ✅" : "Rechazado ❌"}
-                  </span>
-                </div>
+                <span style={{ fontSize: 11, fontWeight: 700,
+                  background: app.status === "accepted" ? "#f0fdf4" : app.status === "rejected" ? "#fff5f5" : "#eff6ff",
+                  color:      app.status === "accepted" ? "#009330" : app.status === "rejected" ? "#f4323f" : "#3b82f6",
+                  borderRadius: 8, padding: "6px 12px" }}>
+                  {app.status === "pending" ? "En revisión ⏳" : app.status === "accepted" ? "Aceptado ✅" : "Rechazado ❌"}
+                </span>
               </div>
             ))}
           </div>
@@ -567,11 +807,11 @@ export default function Vacantes() {
           onSuccess={() => {}}
         />
       )}
-      
       {detailModal && (
         <JobDetailModal
           job={detailModal}
           applied={appliedJobIds.has(detailModal.id)}
+          acceptedCount={acceptedCountByJob[detailModal.id] || 0}
           onClose={() => setDetailModal(null)}
           onApply={() => {
             if (!user) return alert("Inicia sesión para postularte.");

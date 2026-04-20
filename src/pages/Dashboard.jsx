@@ -7,7 +7,7 @@ import {
 import { db } from "../firebase/config";
 import {
   collection, addDoc, serverTimestamp, onSnapshot,
-  query, where, doc, updateDoc,
+  query, where, doc, updateDoc, deleteDoc, getDocs,
 } from "firebase/firestore";
 
 // ─── JSON LOCAL ────────────────────────────────────────────────────────────────
@@ -70,6 +70,36 @@ const EMPTY_JOB_FORM = {
   type: "Full-time", city: "Lima", level: "No aplica",
   vacancies: 1, hiring_deadline: "", salary_range: "", status: "Activo",
 };
+
+// ─── HELPER: NOTIFICACIÓN AL RECLUTADOR ────────────────────────────────────────
+// Escribe en "notifications" con isRecruiterNotification: true para que
+// Notificaciones.jsx las distinga de las notificaciones a candidatos.
+// Comparte la misma estructura de campos que sendRecruiterNotification en Vacantes.jsx.
+async function createRecruiterNotification(firestore, {
+  recruiterId,
+  type = "general",
+  message,
+  vacancyId   = "",
+  vacancyTitle= "",
+  candidateName="",
+}) {
+  if (!recruiterId || !message) return;
+  try {
+    await addDoc(collection(firestore, "notifications"), {
+      userId:                 recruiterId,
+      type,
+      message,
+      vacancyId,
+      vacancyTitle,
+      candidateName,
+      read:                   false,
+      isRecruiterNotification:true,
+      createdAt:              serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("[Dashboard] Error creando notificación al reclutador:", e);
+  }
+}
 
 // ─── ICONS ─────────────────────────────────────────────────────────────────────
 const StarIcon  = ({ filled, onClick, size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill={filled?"#f5b301":"none"} stroke={filled?"#f5b301":"currentColor"} strokeWidth="2" style={{cursor:"pointer"}} onClick={onClick}><path d="M12 17.3l-6.18 3.7 1.64-7.03L2 9.24l7.19-.61L12 2l2.81 6.63 7.19.61-5.46 4.73 1.64 7.03z"/></svg>;
@@ -448,7 +478,10 @@ function FinalizeModal({ candidate, onClose, onFinalize }) {
 }
 
 // ─── TAB: CREAR VACANTE ────────────────────────────────────────────────────────
-function CreateJobTab({ recruiterName, onCreated }) {
+// EXPANDIDO: recibe recruiterId (UID) además de recruiterName para guardarlo
+// en el campo "createdBy" de la vacante. Sin este campo, sendRecruiterNotification
+// en Vacantes.jsx no puede identificar al reclutador destinatario.
+function CreateJobTab({ recruiterName, recruiterId, onCreated }) {
   const [form, setForm]       = useState({ ...EMPTY_JOB_FORM });
   const [saving, setSaving]   = useState(false);
   const [saved, setSaved]     = useState(false);
@@ -469,6 +502,9 @@ function CreateJobTab({ recruiterName, onCreated }) {
       await addDoc(collection(db, "jobs"), {
         ...form,
         created_by: recruiterName || "Reclutador",
+        // NUEVO: guardamos el UID del reclutador en "createdBy" para que
+        // Vacantes.jsx pueda identificar al destinatario de las notificaciones.
+        createdBy:  recruiterId || "",
         created_at: new Date().toISOString(),
         createdAt: serverTimestamp(),
       });
@@ -831,7 +867,7 @@ function StatsTab({ candidates, jobs, applications, interviews, finalized, final
 
 // ─── DASHBOARD PRINCIPAL ────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { profile, logout, permissions } = useAuth();
+  const { user, profile, logout, permissions } = useAuth();
 
   // ── Firebase state ──────────────────────────────────────────────────────────
   const [jobs,          setJobs]          = useState([]);
@@ -895,6 +931,25 @@ export default function Dashboard() {
     });
     return()=>{ unsubJobs(); unsubUsers(); unsubApps(); };
   },[]);// eslint-disable-line
+
+  // ── NUEVO: Listener de entrevistas desde Firestore ──────────────────────────
+  // Reemplaza el estado local (que se perdía al recargar).
+  // Se filtra por recruiterId = UID del reclutador activo para no mezclar
+  // entrevistas de distintos reclutadores.
+  // Los campos persisten en Firestore y "checkInterviewReminders" en Vacantes.jsx
+  // puede consultarlos correctamente desde la colección "interviews".
+  useEffect(()=>{
+    const recruiterId = profile?.uid || user?.uid;
+    if (!recruiterId) return;
+    const q = query(
+      collection(db, "interviews"),
+      where("recruiterId", "==", recruiterId)
+    );
+    const unsub = onSnapshot(q, snap => {
+      setInterviews(snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, [profile?.uid, user?.uid]);// eslint-disable-line
 
   // Sync finalized from applications stored in Firestore so counts persist after reload
   useEffect(()=>{
@@ -986,86 +1041,221 @@ export default function Dashboard() {
   // ── Acciones (existentes) ───────────────────────────────────────────────────
   const toggleSavedJob = id=>setSavedJobs(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
-  const toggleInterview = candidate=>{
-    setInterviews(prev=>{
-      if(prev.find(i=>i.candidateId===candidate.id)) return prev.filter(i=>i.candidateId!==candidate.id);
-      return [...prev,{ candidateId:candidate.id, candidateName:candidate.name, candidateEmail:candidate.email||"",
-        jobId:selectedJob?.id, jobTitle:selectedJob?.title, recruiter:profile?.name||"Reclutador",
-        status:"pending", assignedAt:new Date().toISOString() }];
-    });
+  // EXPANDIDO: además de actualizar el estado local (que ahora viene del listener
+  // de Firestore), escribe/elimina el documento en la colección "interviews".
+  // Esto permite que checkInterviewReminders en Vacantes.jsx encuentre las
+  // entrevistas y genere recordatorios automáticos al reclutador.
+  const toggleInterview = async (candidate) => {
+    const recruiterId = profile?.uid || user?.uid;
+    const existing = interviews.find(i => i.candidateId === candidate.id
+      && i.jobId === selectedJob?.id);
+
+    if (existing) {
+      // Quitar del seguimiento: eliminar el doc de Firestore
+      if (existing.firestoreId) {
+        try { await deleteDoc(doc(db, "interviews", existing.firestoreId)); }
+        catch(e){ console.error(e); }
+      } else {
+        setInterviews(prev => prev.filter(i => i.candidateId !== candidate.id));
+      }
+    } else {
+      // Agregar al seguimiento: crear el doc en Firestore
+      const newInterview = {
+        candidateId:    candidate.id,
+        candidateName:  candidate.name,
+        candidateEmail: candidate.email || "",
+        jobId:          selectedJob?.id  || "",
+        jobTitle:       selectedJob?.title || "",
+        // vacancyId y vacancyTitle son aliases usados por checkInterviewReminders
+        vacancyId:      selectedJob?.id  || "",
+        vacancyTitle:   selectedJob?.title || "",
+        recruiter:      profile?.name || "Reclutador",
+        recruiterId:    recruiterId || "",
+        status:         "pending",
+        assignedAt:     new Date().toISOString(),
+        scheduledAt:    null,
+        scheduledLocation: "",
+      };
+      try {
+        await addDoc(collection(db, "interviews"), newInterview);
+        // Notificación al reclutador: candidato añadido a seguimiento
+        await createRecruiterNotification(db, {
+          recruiterId,
+          type:          "vacancy_activity",
+          message:       `👤 ${candidate.name} fue añadido al seguimiento de entrevistas para "${selectedJob?.title || "una vacante"}".`,
+          vacancyId:     selectedJob?.id   || "",
+          vacancyTitle:  selectedJob?.title|| "",
+          candidateName: candidate.name,
+        });
+      } catch(e){ console.error(e); }
+    }
   };
 
-  const updateInterviewStatus = async (candidateId,status)=>{
+  const updateInterviewStatus = async (candidateId, status) => {
+    const recruiterId = profile?.uid || user?.uid;
     try {
-      setInterviews(prev=>prev.map(i=>i.candidateId===candidateId?{...i,status}:i));
-      const app=applications.find(a=>a.candidateId===candidateId&&a.jobId===selectedJob?.id);
-      if(app) await updateDoc(doc(db,"applications",app.id),{status});
-      const msg=status==="scheduled"?"¡Entrevista coordinada!":"Actualización en tu proceso.";
-      await addDoc(collection(db,"notifications"),{userId:candidateId,message:msg,read:false,createdAt:serverTimestamp()});
-    } catch(e){console.error(e);}
+      // Actualizar estado local (ya viene del listener, pero lo mantenemos por velocidad UI)
+      setInterviews(prev => prev.map(i => i.candidateId === candidateId ? { ...i, status } : i));
+
+      // NUEVO: actualizar el doc de Firestore en la colección "interviews"
+      const interviewDoc = interviews.find(i => i.candidateId === candidateId);
+      if (interviewDoc?.firestoreId) {
+        await updateDoc(doc(db, "interviews", interviewDoc.firestoreId), { status });
+      }
+
+      const app = applications.find(a => a.candidateId === candidateId && a.jobId === selectedJob?.id);
+      if (app) await updateDoc(doc(db, "applications", app.id), { status });
+
+      // Notificación al candidato (existente, no se toca)
+      const msg = status === "scheduled" ? "¡Entrevista coordinada!" : "Actualización en tu proceso.";
+      await addDoc(collection(db, "notifications"), { userId: candidateId, message: msg, read: false, createdAt: serverTimestamp() });
+
+      // NUEVO: Notificación al reclutador cuando la entrevista se marca como realizada
+      if (status === "done" && recruiterId) {
+        const iv = interviews.find(i => i.candidateId === candidateId);
+        await createRecruiterNotification(db, {
+          recruiterId,
+          type:          "vacancy_activity",
+          message:       `✅ Entrevista con ${iv?.candidateName || "el candidato"} para "${selectedJob?.title || "una vacante"}" marcada como realizada.`,
+          vacancyId:     selectedJob?.id    || "",
+          vacancyTitle:  selectedJob?.title || "",
+          candidateName: iv?.candidateName  || "",
+        });
+      }
+    } catch(e){ console.error(e); }
   };
 
   // ── Nuevas acciones ─────────────────────────────────────────────────────────
-  const handleSchedule = async (candidate,scheduleData)=>{
-    const {date,time,location,note,sendEmail:doEmail} = scheduleData;
+  const handleSchedule = async (candidate, scheduleData) => {
+    const { date, time, location, note, sendEmail: doEmail } = scheduleData;
     const isoAt = `${date}T${time}`;
-    setInterviews(prev=>prev.map(i=>i.candidateId===candidate.id
-      ?{...i,status:"scheduled",scheduledAt:isoAt,scheduledLocation:location,scheduledNote:note}
-      :i
+    const recruiterId = profile?.uid || user?.uid;
+
+    setInterviews(prev => prev.map(i => i.candidateId === candidate.id
+      ? { ...i, status:"scheduled", scheduledAt:isoAt, scheduledLocation:location, scheduledNote:note }
+      : i
     ));
+
     try {
-      const app=applications.find(a=>a.candidateId===candidate.id&&a.jobId===selectedJob?.id);
-      if(app) await updateDoc(doc(db,"applications",app.id),{status:"scheduled",scheduledAt:isoAt});
-      await addDoc(collection(db,"notifications"),{
-        userId:candidate.id, message:`📅 Entrevista programada para el ${date} a las ${time}`,
-        read:false, createdAt:serverTimestamp(),
-      });
-      if(doEmail) {
-        await addDoc(collection(db,"emails"),{
-          toUserId:candidate.id, toName:candidate.name, toEmail:candidate.email||"",
-          subject:"Entrevista programada — "+selectedJob?.title,
-          body:`Hola ${candidate.name},\n\nTu entrevista ha sido programada para el ${date} a las ${time}.\n${location?"Lugar/Enlace: "+location+"\n":""}${note?"Notas: "+note+"\n":""}\nSaludos,\n${profile?.name||"Equipo RRHH"}`,
-          sentAt:serverTimestamp(),
+      // Actualizar aplicación (existente)
+      const app = applications.find(a => a.candidateId === candidate.id && a.jobId === selectedJob?.id);
+      if (app) await updateDoc(doc(db, "applications", app.id), { status:"scheduled", scheduledAt:isoAt });
+
+      // NUEVO: Actualizar el doc de Firestore en la colección "interviews"
+      // (los campos scheduledAt y status son los que checkInterviewReminders usa)
+      const interviewDoc = interviews.find(i => i.candidateId === candidate.id);
+      if (interviewDoc?.firestoreId) {
+        await updateDoc(doc(db, "interviews", interviewDoc.firestoreId), {
+          status:            "scheduled",
+          scheduledAt:       isoAt,
+          scheduledLocation: location || "",
+          scheduledNote:     note    || "",
         });
       }
-    } catch(e){console.error(e);}
+
+      // Notificación al candidato (existente, no se toca)
+      await addDoc(collection(db, "notifications"), {
+        userId: candidate.id,
+        message: `📅 Entrevista programada para el ${date} a las ${time}`,
+        read: false, createdAt: serverTimestamp(),
+      });
+
+      // NUEVO: Notificación al reclutador: entrevista agendada
+      await createRecruiterNotification(db, {
+        recruiterId,
+        type:          "interview_reminder",
+        message:       `📅 Entrevista agendada con ${candidate.name} para "${selectedJob?.title || "una vacante"}" el ${date} a las ${time}.${location ? " 📍 "+location : ""}`,
+        vacancyId:     selectedJob?.id    || "",
+        vacancyTitle:  selectedJob?.title || "",
+        candidateName: candidate.name,
+      });
+
+      if (doEmail) {
+        await addDoc(collection(db, "emails"), {
+          toUserId: candidate.id, toName: candidate.name, toEmail: candidate.email || "",
+          subject: "Entrevista programada — " + selectedJob?.title,
+          body: `Hola ${candidate.name},\n\nTu entrevista ha sido programada para el ${date} a las ${time}.\n${location ? "Lugar/Enlace: "+location+"\n" : ""}${note ? "Notas: "+note+"\n" : ""}\nSaludos,\n${profile?.name || "Equipo RRHH"}`,
+          sentAt: serverTimestamp(),
+        });
+      }
+    } catch(e){ console.error(e); }
     setScheduleModal(null);
   };
 
-  const handlePostpone = async (candidate,postponeData)=>{
-    const {reason,newDate,newTime}=postponeData;
-    const isoAt=newDate?`${newDate}T${newTime||"09:00"}`:"";
-    setInterviews(prev=>prev.map(i=>i.candidateId===candidate.id
-      ?{...i,status:"pending",postponeReason:reason,postponedAt:new Date().toISOString(),...(isoAt?{scheduledAt:isoAt}:{})}
-      :i
+  const handlePostpone = async (candidate, postponeData) => {
+    const { reason, newDate, newTime } = postponeData;
+    const isoAt = newDate ? `${newDate}T${newTime || "09:00"}` : "";
+    const recruiterId = profile?.uid || user?.uid;
+
+    setInterviews(prev => prev.map(i => i.candidateId === candidate.id
+      ? { ...i, status:"pending", postponeReason:reason, postponedAt:new Date().toISOString(), ...(isoAt ? { scheduledAt:isoAt } : {}) }
+      : i
     ));
+
     try {
-      await addDoc(collection(db,"notifications"),{
-        userId:candidate.id,
-        message:`⏸️ Tu entrevista fue postergada. Motivo: ${reason}. Nueva fecha: ${newDate||"por confirmar"}`,
-        read:false, createdAt:serverTimestamp(),
-      });
-      if(candidate.candidateEmail||candidate.email) {
-        await addDoc(collection(db,"emails"),{
-          toUserId:candidate.id, toName:candidate.name,
-          toEmail:candidate.candidateEmail||candidate.email||"",
-          subject:"Reprogramación de entrevista — "+selectedJob?.title,
-          body:`Hola ${candidate.name},\n\nLamentamos informarte que tu entrevista ha sido postergada.\n\nMotivo: ${reason}\n${newDate?"Nueva fecha: "+newDate+" a las "+(newTime||"09:00")+"\n":""}\nTe contactaremos para confirmar los detalles.\n\nSaludos,\n${profile?.name||"Equipo RRHH"}`,
-          sentAt:serverTimestamp(),
+      // NUEVO: actualizar el doc de Firestore en la colección "interviews"
+      const interviewDoc = interviews.find(i => i.candidateId === candidate.id);
+      if (interviewDoc?.firestoreId) {
+        await updateDoc(doc(db, "interviews", interviewDoc.firestoreId), {
+          status:        "pending",
+          postponeReason: reason,
+          postponedAt:   new Date().toISOString(),
+          ...(isoAt ? { scheduledAt: isoAt } : {}),
         });
       }
-    } catch(e){console.error(e);}
+
+      // Notificación al candidato (existente, no se toca)
+      await addDoc(collection(db, "notifications"), {
+        userId: candidate.id,
+        message: `⏸️ Tu entrevista fue postergada. Motivo: ${reason}. Nueva fecha: ${newDate || "por confirmar"}`,
+        read: false, createdAt: serverTimestamp(),
+      });
+
+      // NUEVO: Notificación al reclutador: entrevista postergada
+      await createRecruiterNotification(db, {
+        recruiterId,
+        type:          "interview_reminder",
+        message:       `⏸️ Entrevista con ${candidate.name} postergada. Motivo: "${reason}". ${newDate ? "Nueva fecha: "+newDate+(newTime ? " "+newTime : "") : "Fecha por confirmar."} Vacante: "${selectedJob?.title || "—"}".`,
+        vacancyId:     selectedJob?.id    || "",
+        vacancyTitle:  selectedJob?.title || "",
+        candidateName: candidate.name,
+      });
+
+      if (candidate.candidateEmail || candidate.email) {
+        await addDoc(collection(db, "emails"), {
+          toUserId: candidate.id, toName: candidate.name,
+          toEmail: candidate.candidateEmail || candidate.email || "",
+          subject: "Reprogramación de entrevista — " + selectedJob?.title,
+          body: `Hola ${candidate.name},\n\nLamentamos informarte que tu entrevista ha sido postergada.\n\nMotivo: ${reason}\n${newDate ? "Nueva fecha: "+newDate+" a las "+(newTime||"09:00")+"\n" : ""}\nTe contactaremos para confirmar los detalles.\n\nSaludos,\n${profile?.name || "Equipo RRHH"}`,
+          sentAt: serverTimestamp(),
+        });
+      }
+    } catch(e){ console.error(e); }
     setPostponeModal(null);
   };
 
-  const handleFinalize = async ({candidateId,decision,reason,startDate})=>{
+  const handleFinalize = async ({ candidateId, decision, reason, startDate }) => {
+    const recruiterId = profile?.uid || user?.uid;
     try {
-      setFinalized(prev=>[...prev,{candidateId,decision,reason,startDate,finalizedAt:new Date().toISOString()}]);
-      const app=applications.find(a=>a.candidateId===candidateId&&a.jobId===selectedJob?.id);
-      if(app) await updateDoc(doc(db,"applications",app.id),{status:decision,reason});
-      const finalMsg=decision==="accepted"?"¡Felicidades! Has sido aceptado.":"Gracias por participar, tu proceso ha finalizado.";
-      await addDoc(collection(db,"notifications"),{userId:candidateId,message:finalMsg,type:decision,read:false,createdAt:serverTimestamp()});
-    } catch(e){console.error(e);}
+      setFinalized(prev => [...prev, { candidateId, decision, reason, startDate, finalizedAt:new Date().toISOString() }]);
+      const app = applications.find(a => a.candidateId === candidateId && a.jobId === selectedJob?.id);
+      if (app) await updateDoc(doc(db, "applications", app.id), { status:decision, reason });
+
+      // Notificación al candidato (existente, no se toca)
+      const finalMsg = decision === "accepted" ? "¡Felicidades! Has sido aceptado." : "Gracias por participar, tu proceso ha finalizado.";
+      await addDoc(collection(db, "notifications"), { userId:candidateId, message:finalMsg, type:decision, read:false, createdAt:serverTimestamp() });
+
+      // NUEVO: Notificación al reclutador: proceso finalizado
+      const iv = interviews.find(i => i.candidateId === candidateId);
+      await createRecruiterNotification(db, {
+        recruiterId,
+        type:          "vacancy_activity",
+        message:       `${decision === "accepted" ? "✅ Candidato aceptado" : "❌ Candidato rechazado"}: ${iv?.candidateName || "Candidato"} para "${selectedJob?.title || "una vacante"}". Motivo: ${reason}`,
+        vacancyId:     selectedJob?.id    || "",
+        vacancyTitle:  selectedJob?.title || "",
+        candidateName: iv?.candidateName  || "",
+      });
+    } catch(e){ console.error(e); }
   };
 
   const navigateToProfile = useCallback(candidate=>{
@@ -1410,7 +1600,11 @@ export default function Dashboard() {
 
               {/* ══ CREAR VACANTE ══════════════════════════════════════════════ */}
               {activeTab==="create_job" && (
-                <CreateJobTab recruiterName={profile?.name} onCreated={()=>setActiveTab("panel")}/>
+                <CreateJobTab
+                  recruiterName={profile?.name}
+                  recruiterId={profile?.uid || user?.uid}
+                  onCreated={()=>setActiveTab("panel")}
+                />
               )}
             </>
           )}

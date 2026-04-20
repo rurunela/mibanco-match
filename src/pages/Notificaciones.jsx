@@ -10,6 +10,7 @@ import {
 // ─── TIPOS DE REGLA ────────────────────────────────────────────────────────────
 const RULE_TYPES = [
   { value: "count_threshold",   label: "Umbral de notificaciones", icon: "🔢", desc: "Alerta cuando el total de notificaciones supere un número." },
+  { value: "slots_remaining",   label: "Plazas restantes",         icon: "🪑", desc: "Avisa cuando solo queden N plazas por cubrir en una vacante." },
   { value: "vacancy_activity",  label: "Actividad por vacante",    icon: "📋", desc: "Recibe alertas de actividad asociada a una vacante específica." },
   { value: "vacancy_closed",    label: "Vacante cerrada",          icon: "🔒", desc: "Notificación cuando una vacante se cierre (incluso si la cerraste tú)." },
   { value: "open_vacancies",    label: "Vacantes abiertas",        icon: "📊", desc: "Alerta cuando el número de vacantes abiertas cambie." },
@@ -28,6 +29,7 @@ const THRESHOLD_OPTIONS = [10, 25, 50, 100, 200];
 // ─── COLORES POR TIPO ──────────────────────────────────────────────────────────
 const TYPE_COLORS = {
   count_threshold:   { bg: "#fef3c7", color: "#92400e", border: "#fde68a", icon: "🔢" },
+  slots_remaining:   { bg: "#fff7ed", color: "#c2410c", border: "#fed7aa", icon: "🪑" },
   vacancy_activity:  { bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe", icon: "📋" },
   vacancy_closed:    { bg: "#fff5f5", color: "#b91c1c", border: "#fecaca", icon: "🔒" },
   open_vacancies:    { bg: "#f0fdf4", color: "#166534", border: "#bbf7d0", icon: "📊" },
@@ -158,6 +160,7 @@ function NotificationRulesPanel({ userId }) {
   const [saving, setSaving]       = useState(false);
   const [form, setForm]           = useState({
     type: "count_threshold", enabled: true, threshold: 10,
+    slotsThreshold: 1,
     vacancyId: "", vacancyTitle: "", daysBeforeInterview: 1,
     notifyOnAny: true, openVacanciesLimit: 5,
   });
@@ -187,6 +190,8 @@ function NotificationRulesPanel({ userId }) {
 
       if (form.type === "count_threshold") {
         payload.config = { threshold: Number(form.threshold) };
+      } else if (form.type === "slots_remaining") {
+        payload.config = { threshold: Number(form.slotsThreshold) };
       } else if (form.type === "vacancy_activity" || form.type === "vacancy_closed") {
         payload.config = {
           notifyOnAny:  form.notifyOnAny,
@@ -201,7 +206,7 @@ function NotificationRulesPanel({ userId }) {
 
       await addDoc(collection(db, "notificationRules"), payload);
       setShowForm(false);
-      setForm({ type: "count_threshold", enabled: true, threshold: 10, vacancyId: "", vacancyTitle: "", daysBeforeInterview: 1, notifyOnAny: true, openVacanciesLimit: 5 });
+      setForm({ type: "count_threshold", enabled: true, threshold: 10, slotsThreshold: 1, vacancyId: "", vacancyTitle: "", daysBeforeInterview: 1, notifyOnAny: true, openVacanciesLimit: 5 });
     } catch (e) {
       console.error("Error guardando regla:", e);
     }
@@ -220,6 +225,7 @@ function NotificationRulesPanel({ userId }) {
     const cfg = rule.config || {};
     switch (rule.type) {
       case "count_threshold":    return `Alerta cuando superes ${cfg.threshold} notificaciones`;
+      case "slots_remaining":    return `Avisar cuando queden ${cfg.threshold} plaza${cfg.threshold !== 1 ? "s" : ""} por cubrir`;
       case "vacancy_activity":   return cfg.notifyOnAny ? "Actividad en cualquier vacante" : `Actividad en: ${cfg.vacancyTitle || cfg.vacancyId}`;
       case "vacancy_closed":     return cfg.notifyOnAny ? "Cuando se cierre cualquier vacante" : `Cierre de: ${cfg.vacancyTitle || cfg.vacancyId}`;
       case "open_vacancies":     return `Cuando el número de vacantes abiertas baje de ${cfg.openVacanciesLimit}`;
@@ -285,6 +291,27 @@ function NotificationRulesPanel({ userId }) {
                 </div>
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>
                   Recibirás una alerta cuando acumules más de <strong>{form.threshold}</strong> notificaciones sin revisar.
+                </div>
+              </div>
+            )}
+
+            {form.type === "slots_remaining" && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, marginBottom: 8 }}>Avisar cuando queden esta cantidad de plazas</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[1, 2, 3, 5].map(n => (
+                    <button key={n} onClick={() => updateForm("slotsThreshold", n)}
+                      style={{ padding: "8px 16px", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 13, background: form.slotsThreshold === n ? "#f39000" : "#fff", color: form.slotsThreshold === n ? "#fff" : "#374151", border: `2px solid ${form.slotsThreshold === n ? "#f39000" : "#e5e7eb"}` }}>
+                      {n} plaza{n !== 1 ? "s" : ""}
+                    </button>
+                  ))}
+                  <input type="number" min="1" placeholder="Personalizado"
+                    style={{ ...inp, width: 130 }}
+                    value={[1, 2, 3, 5].includes(form.slotsThreshold) ? "" : form.slotsThreshold}
+                    onChange={e => updateForm("slotsThreshold", Number(e.target.value))} />
+                </div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8, background: "#fff7ed", borderRadius: 8, padding: "8px 12px" }}>
+                  ⚠️ Recibirás una alerta cuando solo queden <strong>{form.slotsThreshold} plaza{form.slotsThreshold !== 1 ? "s" : ""}</strong> por cubrir en cualquiera de tus vacantes (basado en candidatos aceptados).
                 </div>
               </div>
             )}
